@@ -3,11 +3,11 @@ import binascii
 import datetime
 import hashlib
 import hmac
+import json
 import os
 import re
 import platform
 import requests
-import json
 
 import boto3
 
@@ -127,14 +127,14 @@ def generate_hash_device(device_group_key, device_key):
     # random device password, which will be used for DEVICE_SRP_AUTH flow
     device_password = base64.standard_b64encode(os.urandom(40)).decode("utf-8")
 
-    combined_string = "%s%s:%s" % (device_group_key, device_key, device_password)
+    combined_string = f"{device_group_key}{device_key}:{device_password}"
     combined_string_hash = hash_sha256(combined_string.encode("utf-8"))
     salt = pad_hex(get_random(16))
 
     x_value = hex_to_long(hex_hash(salt + combined_string_hash))
-    g = hex_to_long(G_HEX)
+    g_value = hex_to_long(G_HEX)
     big_n = hex_to_long(N_HEX)
-    verifier_device_not_padded = pow(g, x_value, big_n)
+    verifier_device_not_padded = pow(g_value, x_value, big_n)
     verifier = pad_hex(verifier_device_not_padded)
 
     device_secret_verifier_config = {
@@ -203,6 +203,9 @@ class AWSSRP:
         self.val_k = hex_to_long(hex_hash("00" + N_HEX + "0" + G_HEX))
         self.small_a_value = self.generate_random_small_a()
         self.large_a_value = self.calculate_a()
+        self.access_token = None
+        self.device_name = None
+        self.cognito_idp_url = None
 
     def generate_random_small_a(self):
         """
@@ -256,7 +259,7 @@ class AWSSRP:
         u_value = calculate_u(self.large_a_value, server_b_value)
         if u_value == 0:
             raise ValueError("U cannot be zero.")
-        username_password = "%s%s:%s" % (device_group_key, device_key, device_password)
+        username_password = f"{device_group_key}{device_key}:{device_password}"
         username_password_hash = hash_sha256(username_password.encode("utf-8"))
 
         x_value = hex_to_long(hex_hash(pad_hex(salt) + username_password_hash))
@@ -506,11 +509,11 @@ class AWSSRP:
             "DeviceSecretVerifierConfig": device_secret_verifier_config,
         }
         response = requests.post(
-            self.cognito_idp_url, headers=headers, data=json.dumps(data)
+            self.cognito_idp_url, headers=headers, data=json.dumps(data), timeout=30
         )
         return response, device_password
 
-    def update_device_status(self, isRemembered, access_token, device_key):
+    def update_device_status(self, is_remembered, access_token, device_key):
         self.cognito_idp_url = (
             f"https://cognito-idp.{self.pool_id.split('_')[0]}.amazonaws.com/"
         )
@@ -521,9 +524,9 @@ class AWSSRP:
             "Content-Type": "application/x-amz-json-1.1",
             "X-Amz-Target": "AWSCognitoIdentityProviderService.UpdateDeviceStatus",
         }
-        if isRemembered == True:
+        if is_remembered is True:
             status = "remembered"
-        elif isRemembered == False:
+        elif is_remembered is False:
             status = "not_remembered"
         data = {
             "AccessToken": self.access_token,
@@ -531,7 +534,7 @@ class AWSSRP:
             "DeviceRememberedStatus": status,
         }
         response = requests.post(
-            self.cognito_idp_url, headers=headers, data=json.dumps(data)
+            self.cognito_idp_url, headers=headers, data=json.dumps(data), timeout=30
         )
         return f"{response} : {response.json}"
 
@@ -548,6 +551,6 @@ class AWSSRP:
         }
         data = {"AccessToken": self.access_token, "DeviceKey": self.device_key}
         response = requests.post(
-            self.cognito_idp_url, headers=headers, data=json.dumps(data)
+            self.cognito_idp_url, headers=headers, data=json.dumps(data), timeout=30
         )
         return f"{response} : {response.json}"
